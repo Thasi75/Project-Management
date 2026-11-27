@@ -75,7 +75,7 @@ def build_workbook(project_name, summary, rows, columns=COLUMNS, title_name='工
     buffer = io.BytesIO()
     # Explicit text writes keep user content such as '=...' as text, not formulas.
     with xlsxwriter.Workbook(buffer, {'in_memory': True, 'strings_to_formulas': False, 'strings_to_urls': False}) as book:
-        book.set_properties({'title': project_name + ' · ' + title_name, 'author': '交付工作台'})
+        book.set_properties({'title': project_name + ' · ' + title_name, 'author': 'FDE交付工作台'})
         sheet = book.add_worksheet(title_name)
         base = {'font_name': 'Microsoft YaHei', 'font_size': 10, 'valign': 'top', 'text_wrap': True}
         title = book.add_format({**base, 'font_size': 18, 'bold': True, 'font_color': '#1E3A5F', 'valign': 'vcenter'})

@@ -1,3 +1,4 @@
+import re
 from contextlib import closing
 import hashlib
 import json
@@ -15,7 +16,7 @@ from .db import engine, Session, WRITE_LOCK
 from . import models as m
 from .service import fail
 
-SCHEMA_HEAD = '009'
+SCHEMA_HEAD = '010'
 
 
 def checksum(path):
@@ -109,7 +110,7 @@ def inspect_backup(name, destination=None):
     try:
         with zipfile.ZipFile(path) as archive:
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest['schema'] not in ('001', '002', '003', '004', '005', '006', '007', '008', SCHEMA_HEAD):
+            if manifest['schema'] not in ('001', '002', '003', '004', '005', '006', '007', '008', '009', SCHEMA_HEAD):
                 fail('备份数据库版本不兼容')
             expected = {'project.db', 'manifest.json', *manifest['files'].keys()}
             if set(archive.namelist()) != expected or len(archive.namelist()) != len(expected):
@@ -196,4 +197,9 @@ def clean_staging():
         for item in stale:
             (DATA / item.path).unlink(missing_ok=True)
             session.delete(item)
+        from .brief_import import clean_stage
+        cutoff_time = datetime.fromisoformat(cutoff).timestamp()
+        for folder in (DATA / 'staging').glob('brief-import-*'):
+            if folder.is_dir() and re.fullmatch(r'brief-import-[a-f0-9]{32}', folder.name) and folder.stat().st_mtime < cutoff_time:
+                clean_stage(folder)
 

@@ -142,7 +142,7 @@ def test_configuration_report_generation_and_immutable_versions(client,setup_pro
 
 def test_configuration_backup_restore_and_schema_004_upgrade(client,setup_project,tmp_path):
     p,_,_=setup_project('配置备份');row=create_record(client,p,'configurations',data(p)).json()
-    backup=client.post('/api/backups').json();assert backup['schema']=='009'
+    backup=client.post('/api/backups').json();assert backup['schema']=='010'
     assert client.put(path(p,row),json=data(p,version=row['version'],config_info='临时修改')).status_code==200
     assert client.post('/api/backups/'+backup['name']+'/restore',json={'confirmation':'替换当前业务数据'}).status_code==200
     assert client.get(path(p,row)).json()==row
@@ -156,6 +156,9 @@ def test_configuration_backup_restore_and_schema_004_upgrade(client,setup_projec
         db.execute('DROP TABLE project_configurations')
         db.execute("DELETE FROM entity_revisions WHERE kind='configurations'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='configurations'")
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -171,7 +174,7 @@ def test_configuration_backup_restore_and_schema_004_upgrade(client,setup_projec
     restored=client.post('/api/backups/'+legacy.name+'/restore',json={'confirmation':'替换当前业务数据'})
     assert restored.status_code==200,restored.text
     with closing(sqlite3.connect(DATA/'project.db')) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='010'
         assert db.execute('SELECT count(*) FROM project_configurations').fetchone()[0]==0
         assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not db.execute('PRAGMA foreign_key_check').fetchall()
@@ -194,6 +197,9 @@ def test_configuration_schema_006_preserves_legacy_names_and_original_data(clien
         db.execute('ALTER TABLE project_configurations DROP COLUMN config_name')
         db.execute('DROP INDEX ix_project_costs_expense_date')
         db.execute('ALTER TABLE project_costs DROP COLUMN expense_date')
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -213,7 +219,7 @@ def test_configuration_schema_006_preserves_legacy_names_and_original_data(clien
     response=client.post('/api/backups/'+legacy.name+'/restore',json={'confirmation':'替换当前业务数据'})
     assert response.status_code==200,response.text
     with closing(sqlite3.connect(DATA/'project.db')) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='010'
         assert dict(db.execute('SELECT id,config_name FROM project_configurations'))==expected
         assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not db.execute('PRAGMA foreign_key_check').fetchall()

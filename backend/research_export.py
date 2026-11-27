@@ -7,6 +7,7 @@ from .config import now
 from .log_export import build_workbook
 
 COLUMNS = [('序号', 8), ('编号', 16), ('日期', 13), ('功能模块', 24), ('需求描述', 56),
+           ('接口', 10), ('对接系统', 26),
            ('需求来源', 16), ('记录人', 16), ('重要性', 10), ('是否响应', 12),
            ('状态', 10), ('解决思路', 56), ('备注', 36)]
 
@@ -26,11 +27,12 @@ def export_research(session, pid, **filters):
     modules = {p.id: p.name for p in session.scalars(select(m.Module).where(m.Module.project_id == pid))}
     records = list(session.scalars(s.business_query(session, pid, 'research', **filters)))
     if len(records) > 1048572:
-        s.fail('调研数量超过 Excel 单表上限，请缩小日期范围后导出')
+        s.fail('调研数量超过 Excel 单表上限，请缩小筛选范围后导出')
     rows = []
     for record in records:
         row = [record.sequence, record.code, datetime.combine(date.fromisoformat(record.research_date), datetime.min.time()),
-               modules[record.module_id], record.payload['requirement'], people[record.source_id],
+               modules[record.module_id], record.payload['requirement'], '是' if record.payload.get('is_interface', False) else '否',
+               record.payload.get('integration_system', ''), people[record.source_id],
                people[record.recorder_id], record.importance, record.responded, record.status,
                record.payload['solution'], record.payload.get('notes', '')]
         for (label, _), value in zip(COLUMNS, row):
@@ -38,6 +40,8 @@ def export_research(session, pid, **filters):
                 s.fail(f'调研 {record.code} 的“{label}”超过 Excel 单元格 32767 字符上限，请缩短内容后导出')
         rows.append(row)
     selected = []
+    if filters.get('is_interface') is not None:
+        selected.append('接口：' + ('是' if filters['is_interface'] else '否'))
     for key, label, mapping in [('q', '关键词', None), ('module_id', '功能模块', modules),
                                 ('status', '状态', None), ('importance', '重要性', None),
                                 ('responded', '是否响应', None), ('source_id', '需求来源', people),

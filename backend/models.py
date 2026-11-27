@@ -133,6 +133,17 @@ class Research(Business, Base):
                      CheckConstraint("status IN ('设计','开发','上线')", name='ck_research_status'))
 
 
+class CodingWork(Business, Base):
+    __tablename__ = 'coding_work'
+    work_date = Column(String, nullable=False, index=True)
+    module_id = Column(String, nullable=False)
+    feature = Column(String, nullable=False)
+    duration_minutes = Column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint('id', 'project_id'),
+                     ForeignKeyConstraint(['module_id', 'project_id'], ['project_modules.id', 'project_modules.project_id']),
+                     CheckConstraint('duration_minutes = CAST(duration_minutes AS INTEGER) AND duration_minutes >= 1 AND duration_minutes <= 2147483647', name='ck_coding_duration'))
+
+
 class Configuration(Business, Base):
     __tablename__ = 'project_configurations'
     config_name = Column(String, nullable=False)

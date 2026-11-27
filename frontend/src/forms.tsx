@@ -1,3 +1,4 @@
+import {focusMarkdownInput} from './Markdown';
 import {useState,useRef,useEffect} from 'react';
 import {api,download,day,localTime,taskStates,expenseItems,labels,type RecordKind,type Row,type ResearchNavigation} from './api';
 import {useAppDialog} from './AppDialog';
@@ -16,22 +17,22 @@ export function RecordForm(props:Props){
  const [navigating,setNavigating]=useState(false),navigationLock=useRef(false);
  const {remember,forProject}=useAttachments();
  const readOnly=!!row?.readOnly;
- const [value,setValue]=useState<Row>(()=>({status:kind==='research'?'设计':kind==='risks'?'待处理':'未开始',importance:'中',responded:'是',research_date:day(),level:'中',enabled:true,sort:0,plan_start:day(),plan_end:day(),work_date:day(),config_date:day(),expense_date:day(),project_id:pid,change_date:day(),raised_date:day(),effective_date:day(),member_ids:[],participant_ids:[],attachment_ids:[],change_ids:[],task_ids:[],reason:'',...row,...(kind==='communications'?{module_id:row?.module_id||modules.find(m=>m.project_id===pid&&m.name==='项目公共事务'&&m.enabled)?.id}:{}),occurred_at:row?.occurred_at?.replace(' ','T')||localTime()}));
+ const [value,setValue]=useState<Row>(()=>({status:kind==='research'?'设计':kind==='risks'?'待处理':'未开始',importance:'中',responded:'是',is_interface:false,integration_system:'',research_date:day(),level:'中',enabled:true,sort:0,plan_start:day(),plan_end:day(),work_date:day(),config_date:day(),expense_date:day(),project_id:pid,change_date:day(),raised_date:day(),effective_date:day(),member_ids:[],participant_ids:[],attachment_ids:[],change_ids:[],task_ids:[],reason:'',...row,...(['communications','coding'].includes(kind)?{module_id:row?.module_id||modules.find(m=>m.project_id===pid&&m.name==='项目公共事务'&&m.enabled)?.id}:{}),occurred_at:row?.occurred_at?.replace(' ','T')||localTime()}));
  const [dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[uploading,setUploading]=useState(false),[error,setError]=useState('');
  const [exporting,setExporting]=useState<'docx'|'pdf'|null>(null),exportLock=useRef(false);
  const [related,setRelated]=useState<Row>({tasks:[],changes:[],scopes:[],attachments:[]});
  const staged=useRef<string[]>([]),key=useRef(crypto.randomUUID());
  const formRef=useRef<HTMLFormElement>(null),submitting=useRef(false),focusAfterSave=useRef<'name'|'requirement'|null>(null);
- useEffect(()=>{if(!busy&&focusAfterSave.current){const field=focusAfterSave.current;focusAfterSave.current=null;formRef.current?.querySelector<HTMLInputElement|HTMLTextAreaElement>('[name="'+field+'"]')?.focus();}},[busy]);
+ useEffect(()=>{if(!busy&&focusAfterSave.current){const field=focusAfterSave.current;focusAfterSave.current=null;focusMarkdownInput(formRef.current?.querySelector<HTMLInputElement|HTMLTextAreaElement>('[name="'+field+'"]'));}},[busy]);
  const set=(k:string,v:any)=>{setValue(old=>({...old,[k]:v}));setDirty(true);};
  // Load all relation choices through paginated endpoints without truncation.
- useEffect(()=>{let alive=true;void(async()=>{if(!pid||['communications','configurations','costs','research'].includes(kind))return;try{async function all(k:string){let items:Row[]=[],page=1;while(true){const data=await api('/records/'+k+'?project_id='+pid+'&size=200&page='+page);items.push(...data.items);if(items.length>=data.total)break;page++;}return items;}
+ useEffect(()=>{let alive=true;void(async()=>{if(!pid||['communications','configurations','costs','research','coding'].includes(kind))return;try{async function all(k:string){let items:Row[]=[],page=1;while(true){const data=await api('/records/'+k+'?project_id='+pid+'&size=200&page='+page);items.push(...data.items);if(items.length>=data.total)break;page++;}return items;}
  const [tasks,changes,scopes,attachments]=await Promise.all([all('tasks'),all('changes'),api('/projects/'+pid+'/scopes'),api('/projects/'+pid+'/attachments')]);if(alive){setRelated({tasks,changes,scopes,attachments});remember(attachments);}}catch(e){onError(e);}})();return()=>{alive=false;};},[pid]);
  useEffect(()=>{if(kind!=='research'||row?.id)return;let alive=true;api('/projects/'+pid+'/research/next-sequence').then(data=>{if(alive)setValue(old=>old.sequence===undefined?{...old,sequence:data.sequence}:old);}).catch(e=>{if(alive)setError('读取下一条序号失败：'+e.message+'。可手工填写序号后继续。');});return()=>{alive=false;};},[kind,pid,row?.id,sequenceRequest]);
  const memberOptions=people.filter(p=>p.project_id===pid).map(p=>({id:p.id,enabled:p.enabled,name:p.name,team:p.team}));
  const sourceOptions=[...memberOptions].sort((a,b)=>Number(b.enabled)-Number(a.enabled)).map(person=>({...person,id:person.name+(person.team?.trim()?' · '+person.team.trim():'')})).filter((person,index,all)=>all.findIndex(other=>other.id===person.id)===index);
  if(kind==='changes'&&row?.source&&!sourceOptions.some(person=>person.id===row.source))sourceOptions.push({id:row.source,name:row.source,team:'原有来源',enabled:true});
- useEffect(()=>{if(kind!=='communications')return;const defaultModule=modules.find(m=>m.project_id===pid&&m.name==='项目公共事务'&&m.enabled);if(defaultModule)setValue(old=>old.module_id===undefined?{...old,module_id:defaultModule.id}:old);},[modules,pid,kind]);
+ useEffect(()=>{if(!['communications','coding'].includes(kind))return;const defaultModule=modules.find(m=>m.project_id===pid&&m.name==='项目公共事务'&&m.enabled);if(defaultModule)setValue(old=>old.module_id===undefined?{...old,module_id:defaultModule.id}:old);},[modules,pid,kind]);
  const moduleOptions=modules.filter(p=>p.project_id===pid).sort((a,b)=>Number(b.name==='项目公共事务')-Number(a.name==='项目公共事务')).map(p=>({id:p.id,name:p.name,enabled:p.enabled}));
  const taskOptions=related.tasks.map((x:Row)=>({id:x.id,name:x.code+' · '+x.name}));
  const changeOptions=related.changes.map((x:Row)=>({id:x.id,name:x.code+' · '+x.title}));
@@ -61,10 +62,13 @@ export function RecordForm(props:Props){
  if(kind==='logs') fields=[{key:'work_date',label:'工作日期',type:'date',required:true},module,owner,
  {key:'task_id',label:'关联任务',type:'select',options:taskOptions},participants,{key:'content',label:'工作内容',type:'textarea',wide:true,required:true},
  {key:'details',label:'工作详情',type:'textarea',wide:true},{key:'next_plan',label:'后续安排',type:'textarea',wide:true},notes];
+ if(kind==='coding') fields=[{key:'work_date',label:'日期',type:'date',required:true},{...module,required:true},{key:'feature',label:'功能点',required:true},{key:'duration_minutes',label:'耗时（分钟）',type:'number',required:true,min:1,max:2147483647,hint:'填写正整数分钟；指标按累计分钟÷60取完整小时。'},{key:'work_content',label:'主要工作',type:'textarea',wide:true,required:true},{key:'extra_time_notes',label:'异常或额外耗时说明',type:'textarea',wide:true}];
  if(kind==='costs') fields=[{key:'expense_date',label:'费用日期',type:'date',required:true},
  {key:'expense_item',label:'费用项目',type:'select',required:true,options:options(expenseItems)},
  {key:'amount',label:'金额（元）',type:'money',required:true},notes];
  if(kind==='research') fields=[{key:'sequence',label:'序号',type:'number',required:true,min:1,max:2147483647},{key:'research_date',label:'日期',type:'date',required:true},{...module,required:true},
+ {key:'is_interface',label:'接口',content:<button type="button" className="research-interface-toggle" role="switch" aria-label="接口" aria-checked={!!value.is_interface} disabled={readOnly||busy||navigating} onClick={()=>set('is_interface',!value.is_interface)}><span className="switch-track" aria-hidden="true"><span/></span><span>{value.is_interface?'是':'否'}</span></button>},
+ {key:'integration_system',label:'对接系统',required:!!value.is_interface},
  {key:'requirement',label:'需求描述',type:'textarea',required:true,wide:true},
  {key:'source_id',label:'需求来源',type:'select',options:memberOptions,groupByTeam:true,required:true},
  {key:'recorder_id',label:'记录人',type:'select',options:memberOptions,groupByTeam:true,required:true},
@@ -72,6 +76,7 @@ export function RecordForm(props:Props){
  {key:'responded',label:'是否响应',type:'select',options:options(['是','否']),required:true},
  {key:'status',label:'状态',type:'select',options:options(['设计','开发','上线']),required:true},
  {key:'solution',label:'解决思路',type:'textarea',required:true,wide:true},notes];
+ if(kind==='research'&&value.is_interface)fields.push({key:'go_live_date',label:'上线日期',type:'date',required:value.status==='上线'});
  if(kind==='configurations') fields=[{key:'config_name',label:'项目',required:true},
  {key:'config_date',label:'创建或变更日期',type:'date',required:true},
  {key:'config_info',label:'配置信息',type:'textarea',required:true,wide:true},notes];
@@ -91,7 +96,7 @@ export function RecordForm(props:Props){
  {key:'summary',label:'沟通概况',type:'textarea',required:true,wide:true,heightKey:'summary_height'},{key:'details',label:'沟通详情',type:'textarea',wide:true,heightKey:'details_height'}];
  if(kind==='person') fields=[{key:'name',label:'姓名',required:true},{key:'team',label:'单位 / 团队'},notes,{key:'enabled',label:'启用',type:'checkbox'}];
  if(kind==='module') fields=[{key:'name',label:'模块名称',required:true},{key:'sort',label:'排序',type:'number'},{key:'enabled',label:'启用',type:'checkbox'}];
- const business=!['person','module','configurations','costs','research'].includes(kind);
+ const business=!['person','module','configurations','costs','research','coding'].includes(kind);
  if(business)fields.push({key:'effective_date',label:'本次修订业务生效日',type:'date',required:true,hint:'用于历史还原；实际开始和完成按对应实际日期记录。'},{key:'reason',label:row?'修订原因':'登记说明',required:!!row&&['tasks','project'].includes(kind)});
  if(kind==='logs'&&row?.communication_id)fields=fields.map(field=>['work_date','module_id','owner_id','participant_ids','content','details'].includes(field.key)?{...field,disabled:true}:field);
  const canContinue=['module','research'].includes(kind)&&!row?.id&&!readOnly;
@@ -125,10 +130,12 @@ export function RecordForm(props:Props){
  async function close(){for(const id of staged.current)await api('/attachments/staged/'+id,'DELETE').catch(()=>{});onClose();}
  async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(submitting.current||busy||uploading||readOnly||navigationLock.current||exportLock.current)return;const validation=validateForm(e.currentTarget);if(validation){setError(validation);return;}const nativeValues=new FormData(e.currentTarget);const continueAdding=canContinue&&(e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='continue';submitting.current=true;setBusy(true);setError('');try{
   const data:Row={}; for(const field of fields){const v=(field.type==='date'||field.type==='datetime-local')&&!field.disabled?(nativeValues.get(field.key)||null):value[field.key];if(v!==undefined)data[field.key]=v;
-   if(field.heightKey){const textarea=e.currentTarget.elements.namedItem(field.key);if(textarea instanceof HTMLTextAreaElement)data[field.heightKey]=Math.max(80,Math.round(textarea.getBoundingClientRect().height));}
+   if(field.heightKey){const textarea=e.currentTarget.elements.namedItem(field.key);if(textarea instanceof HTMLTextAreaElement)data[field.heightKey]=Math.max(80,Math.round(textarea.getBoundingClientRect().height||Number(textarea.dataset.markdownHeight)||value[field.heightKey]||80));}
   }if(row?.id)data.version=row.version;
   if(kind==='communications'){const time=String(data.occurred_at||'').replace('T',' ');data.occurred_at=time.length===16?time+':00':time;if(!data.host_id||!data.recorder_id)throw new Error('请选择主持人和记录人。');}
+  if(kind==='coding')data.duration_minutes=Number(data.duration_minutes);
   if(kind==='changes')data.source=data.source||'';
+  if(kind==='research'&&!value.is_interface)data.go_live_date=value.go_live_date||null;
   if(kind==='project')data.attachment_ids=value.attachment_ids;
   if(kind==='tasks'&&value.status!=='已完成')data.actual_end=null;
   if(kind==='risks'&&value.status!=='已关闭')data.closed_date=null;
@@ -137,7 +144,7 @@ export function RecordForm(props:Props){
   if(continueAdding){
    if(kind==='research'){
     setValue({research_date:result.research_date,module_id:result.module_id,source_id:result.source_id,recorder_id:result.recorder_id,
-     requirement:'',solution:'',notes:'',importance:'中',responded:'是',status:'设计'});
+     requirement:'',solution:'',notes:'',importance:'中',responded:'是',status:'设计',is_interface:false,integration_system:''});
     setSequenceRequest(request=>request+1);focusAfterSave.current='requirement';
    }else{setValue(old=>({...old,name:'',sort:result.sort+1}));focusAfterSave.current='name';}
    setDirty(false);key.current=crypto.randomUUID();
@@ -151,9 +158,10 @@ export function RecordForm(props:Props){
  {kind==='project'&&!row?.id&&<div className="note">保存项目后，可在项目概况中维护人员资料，再编辑项目指定负责人。</div>}
  {error&&<div className="error" role="alert">{error}</div>}{kind==='research'?<div className="research-fields">
  {[
-  {className:'research-core-fields',keys:['sequence','research_date','module_id']},
+  {className:'research-core-fields',keys:['sequence','research_date','module_id','is_interface','integration_system']},
   {className:'research-text-fields',keys:['requirement']},
   {className:'research-choice-fields',keys:['source_id','recorder_id','importance','responded','status']},
+  ...(value.is_interface?[{className:'research-launch-fields',keys:['go_live_date']}]:[]),
   {className:'research-text-fields',keys:['solution','notes']},
  ].map(group=><div className={group.className} key={group.keys[0]}><Fields fields={fields.filter(field=>group.keys.includes(field.key))} value={value} onChange={set} disabled={readOnly||busy||navigating}/></div>)}
  </div>:<Fields fields={fields} value={value} onChange={set} disabled={readOnly||busy}/>}

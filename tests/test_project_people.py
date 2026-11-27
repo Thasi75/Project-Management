@@ -115,6 +115,9 @@ def test_legacy_shared_identity_migrates_without_rewriting_history_or_snapshots(
         db.execute('DROP TABLE communications')
         for column in PROFILE_COLUMNS:
             db.execute('ALTER TABLE project_members DROP COLUMN ' + column)
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -151,11 +154,11 @@ def test_legacy_shared_identity_migrates_without_rewriting_history_or_snapshots(
     assert create_record(client, b, 'tasks', task_data(shared)).status_code == 200
     # A current backup retains divergent project profiles, not the legacy global values.
     current = client.post('/api/backups').json()
-    assert current['schema'] == '009'
+    assert current['schema'] == '010'
     assert person_update(client, a, changed.json(), name='临时名称').status_code == 200
     assert client.post('/api/backups/' + current['name'] + '/restore', json={'confirmation': '替换当前业务数据'}).status_code == 200
     assert next(row for row in client.get(path(a)).json() if row['id'] == shared['id'])['name'] == '只属于甲的新名称'
     with sqlite3.connect(DATA / 'project.db') as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '010'
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert not db.execute('PRAGMA foreign_key_check').fetchall()

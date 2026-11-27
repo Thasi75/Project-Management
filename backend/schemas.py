@@ -1,9 +1,21 @@
 from datetime import date, datetime
 from decimal import Decimal
 import re
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from typing import Annotated, Literal
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, AfterValidator, model_validator, field_validator
 from .config import today
+
+
+def nonblank_markdown(value):
+    if not value.strip():
+        raise ValueError('内容不能为空')
+    return value
+
+
+# Markdown indentation and trailing newlines are meaningful; only single-line
+# values keep the application's automatic whitespace trimming.
+MarkdownText = Annotated[str, StringConstraints(strip_whitespace=False)]
+RequiredMarkdown = Annotated[MarkdownText, AfterValidator(nonblank_markdown)]
 
 
 class Input(BaseModel):
@@ -14,7 +26,7 @@ class Input(BaseModel):
 class PersonInput(Input):
     name: str = Field(min_length=1, max_length=120)
     team: str = ''
-    notes: str = ''
+    notes: MarkdownText = ''
     enabled: bool = True
 
 
@@ -26,7 +38,7 @@ class ModuleInput(Input):
 
 class BusinessInput(Input):
     effective_date: str = Field(default_factory=today)
-    reason: str = ''
+    reason: MarkdownText = ''
 
     @model_validator(mode='after')
     def dates(self):
@@ -51,11 +63,11 @@ class ProjectInput(BusinessInput):
     plan_start: str | None = None
     plan_end: str | None = None
     status: Literal['未开始', '进行中', '暂停', '已完成'] = '未开始'
-    scope: str = Field(min_length=1)
-    exclusions: str = ''
-    deliverables: str = ''
-    acceptance: str = ''
-    notes: str = ''
+    scope: RequiredMarkdown = Field(min_length=1)
+    exclusions: MarkdownText = ''
+    deliverables: MarkdownText = ''
+    acceptance: MarkdownText = ''
+    notes: MarkdownText = ''
     # Older clients may submit the unchanged list; membership is now maintained via project people.
     member_ids: list[str] | None = None
     attachment_ids: list[str] = Field(default_factory=list)
@@ -68,23 +80,23 @@ class TaskInput(BusinessInput):
     module_id: str | None = None
     plan_start: str
     plan_end: str
-    planned_deliverable: str = Field(min_length=1)
+    planned_deliverable: RequiredMarkdown = Field(min_length=1)
     owner_id: str = Field(min_length=1)
     participant_ids: list[str] = Field(default_factory=list)
     actual_start: str | None = None
     actual_end: str | None = None
-    actual_deliverable: str = ''
+    actual_deliverable: MarkdownText = ''
     delivery_url: str = ''
     attachment_ids: list[str] = Field(default_factory=list)
     status: Literal['未开始', '进行中', '暂停', '已完成', '已取消'] = '未开始'
     change_ids: list[str] = Field(default_factory=list)
-    notes: str = ''
+    notes: MarkdownText = ''
 
     @model_validator(mode='after')
     def state(self):
         if self.status in ('进行中', '暂停', '已完成') and not self.actual_start:
             raise ValueError('执行中的任务必须填写实际开始日期')
-        if self.status == '已完成' and (not self.actual_end or not self.actual_deliverable):
+        if self.status == '已完成' and (not self.actual_end or not self.actual_deliverable.strip()):
             raise ValueError('完成任务必须填写实际结束日期和实际交付物')
         if self.status != '已完成' and self.actual_end:
             raise ValueError('只有已完成任务可以填写实际结束日期')
@@ -100,10 +112,10 @@ class LogInput(BusinessInput):
     module_id: str | None = None
     owner_id: str = Field(min_length=1)
     participant_ids: list[str] = Field(default_factory=list)
-    content: str = Field(min_length=1)
-    details: str = ''
-    next_plan: str = ''
-    notes: str = ''
+    content: RequiredMarkdown = Field(min_length=1)
+    details: MarkdownText = ''
+    next_plan: MarkdownText = ''
+    notes: MarkdownText = ''
     task_id: str | None = None
 
     @field_validator('module_id', mode='before')
@@ -120,8 +132,8 @@ class CommunicationInput(BusinessInput):
     participant_ids: list[str] = Field(default_factory=list)
     host_id: str = Field(min_length=1)
     recorder_id: str = Field(min_length=1)
-    summary: str = Field(min_length=1)
-    details: str = ''
+    summary: RequiredMarkdown = Field(min_length=1)
+    details: MarkdownText = ''
     summary_height: int | None = Field(default=None, ge=80)
     details_height: int | None = Field(default=None, ge=80)
 
@@ -142,28 +154,67 @@ class ResearchInput(BusinessInput):
     sequence: int | None = Field(default=None, ge=1, le=2147483647, strict=True)
     research_date: str = Field(min_length=1)
     module_id: str = Field(min_length=1)
-    requirement: str = Field(min_length=1)
+    requirement: RequiredMarkdown = Field(min_length=1)
     source_id: str = Field(min_length=1)
     recorder_id: str = Field(min_length=1)
     importance: Literal['高', '中', '低'] = '中'
     responded: Literal['是', '否'] = '是'
     status: Literal['设计', '开发', '上线'] = '设计'
-    solution: str = Field(min_length=1)
-    notes: str = ''
+    solution: RequiredMarkdown = Field(min_length=1)
+    notes: MarkdownText = ''
+
+    is_interface: bool = Field(default=False, strict=True)
+    integration_system: str = ''
+    go_live_date: str | None = None
+
+    @model_validator(mode='after')
+    def interface_system_required(self):
+        if self.is_interface and not self.integration_system:
+            raise ValueError('接口为是时必须填写对接系统')
+        if self.is_interface and self.status == '上线' and not self.go_live_date:
+            raise ValueError('接口状态为上线时必须填写上线日期')
+        return self
+
+
+class ExternalInterfaceInput(Input):
+    version: int = Field(ge=1, strict=True)
+    status: Literal['设计', '开发', '上线']
+    development_notes: MarkdownText = ''
+    go_live_date: str | None = None
+
+    @model_validator(mode='after')
+    def launch_date(self):
+        if self.status == '上线' and not self.go_live_date:
+            raise ValueError('状态为上线时必须填写上线日期')
+        if self.go_live_date:
+            if date.fromisoformat(self.go_live_date).isoformat() != self.go_live_date:
+                raise ValueError('上线日期必须采用 YYYY-MM-DD 格式')
+            if self.go_live_date > today():
+                raise ValueError('上线日期不能晚于今天')
+        return self
+
+
+class CodingWorkInput(BusinessInput):
+    work_date: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    feature: str = Field(min_length=1, max_length=200)
+    work_content: RequiredMarkdown = Field(min_length=1)
+    duration_minutes: int = Field(ge=1, le=2147483647, strict=True)
+    extra_time_notes: MarkdownText = ''
 
 
 class ConfigurationInput(BusinessInput):
     config_name: str = Field(min_length=1, max_length=200)
-    config_info: str = Field(min_length=1)
+    config_info: RequiredMarkdown = Field(min_length=1)
     config_date: str = Field(min_length=1)
-    notes: str = ''
+    notes: MarkdownText = ''
 
 
 class CostInput(BusinessInput):
     expense_date: str = Field(min_length=1)
     expense_item: Literal['省际交通费', '市内交通费', '住宿费', '业务招待费', 'Token', '其他']
     amount: str
-    notes: str = ''
+    notes: MarkdownText = ''
 
     @field_validator('amount', mode='before')
     @classmethod
@@ -177,28 +228,28 @@ class CostInput(BusinessInput):
 class ChangeInput(BusinessInput):
     change_date: str = Field(default_factory=today)
     title: str = Field(min_length=1, max_length=200)
-    content: str = Field(min_length=1)
-    original: str = ''
-    change_reason: str = ''
+    content: RequiredMarkdown = Field(min_length=1)
+    original: MarkdownText = ''
+    change_reason: MarkdownText = ''
     source: str = ''
     module_id: str | None = None
-    impact: str = ''
+    impact: MarkdownText = ''
     scope_id: str | None = None
     task_ids: list[str] = Field(default_factory=list)
     attachment_ids: list[str] = Field(default_factory=list)
-    notes: str = ''
+    notes: MarkdownText = ''
 
 
 class RiskInput(BusinessInput):
-    description: str = Field(min_length=1)
+    description: RequiredMarkdown = Field(min_length=1)
     level: Literal['低', '中', '高'] = '中'
     raised_date: str = Field(default_factory=today)
     owner_id: str | None = None
     task_id: str | None = None
-    response: str = ''
+    response: MarkdownText = ''
     status: Literal['待处理', '处理中', '已关闭'] = '待处理'
     closed_date: str | None = None
-    notes: str = ''
+    notes: MarkdownText = ''
 
     @model_validator(mode='after')
     def state(self):
@@ -221,11 +272,11 @@ class ArchiveInput(VersionInput):
 
 class RemoveInput(VersionInput):
     effective_date: str = Field(default_factory=today)
-    reason: str = Field(min_length=1)
+    reason: RequiredMarkdown = Field(min_length=1)
 
 
 class AttachmentInput(VersionInput):
-    description: str = ''
+    description: MarkdownText = ''
     removed: bool = False
 
 

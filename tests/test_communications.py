@@ -234,7 +234,7 @@ def test_search_dates_snapshot_and_current_backup(client, setup_project):
         version=m.BriefVersion(brief_id=brief.id,number=1,snapshot=frozen,content={'sections':[]},model='test',source='测试')
         session.add(version);session.flush();vid=version.id
     backup=client.post('/api/backups').json()
-    assert backup['schema']=='009'
+    assert backup['schema']=='010'
     assert remove(client,project,'communications',last).status_code==200
     assert client.get('/api/brief-versions/'+vid).json()['snapshot']==frozen
     assert client.post('/api/backups/'+backup['name']+'/restore',json={'confirmation':'替换当前业务数据'}).status_code==200

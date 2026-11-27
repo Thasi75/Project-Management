@@ -1,3 +1,4 @@
+import {MarkdownEditor,focusMarkdownInput} from './Markdown';
 import {createContext, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
 import {X, Upload, RefreshCw, FileText, Ellipsis} from 'lucide-react';
 import {api, type Row} from './api';
@@ -6,9 +7,9 @@ import {PeopleCheckboxes,PeopleOptions} from './PeopleChoices';
 import {AcceptanceToggle,useAttachments} from './Attachments';
 
 const ModalCloseContext = createContext<() => void>(() => {});
-export function ModalCloseButton({children}: {children: ReactNode}) {
+export function ModalCloseButton({children,disabled=false}: {children: ReactNode,disabled?:boolean}) {
   const close = useContext(ModalCloseContext);
-  return <button type="button" onClick={close}>{children}</button>;
+  return <button type="button" disabled={disabled} onClick={close}>{children}</button>;
 }
 
 export function validateForm(form: HTMLFormElement): string | null {
@@ -16,7 +17,7 @@ export function validateForm(form: HTMLFormElement): string | null {
     if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)
       || !control.willValidate || control.validity.valid) continue;
     const label = control.getAttribute('data-field-label') || control.closest('label')?.querySelector('span')?.textContent?.replace(/\s*\*\s*$/, '') || '此项';
-    control.focus();
+    focusMarkdownInput(control);
     if (control.validity.valueMissing) return (control instanceof HTMLSelectElement || control instanceof HTMLInputElement && control.type==='radio' ? '请选择' : '请填写') + label;
     return '请检查“' + label + '”的格式或取值';
   }
@@ -35,7 +36,7 @@ export function Modal({title,children,onClose,wide=false,dirty=false,fullscreen=
     } finally {closing.current = false;}
   };
   useEffect(() => {ref.current?.showModal(); const handler=(e:BeforeUnloadEvent)=>{if(dirty){e.preventDefault();e.returnValue='';}}; window.addEventListener('beforeunload',handler); return()=>window.removeEventListener('beforeunload',handler);},[dirty]);
-  return <ModalCloseContext.Provider value={()=>void close()}><dialog ref={ref} className={'modal '+(wide?'wide ':'')+(fullscreen?'fullscreen':'')} onCancel={e=>{e.preventDefault();void close();}}><div className="modal-head"><div><span className="eyebrow">交付工作台</span><h2>{title}</h2></div><button type="button" className="icon" aria-label="关闭弹窗" onClick={()=>void close()}><X size={22}/></button></div>{children}</dialog></ModalCloseContext.Provider>;
+  return <ModalCloseContext.Provider value={()=>void close()}><dialog ref={ref} className={'modal '+(wide?'wide ':'')+(fullscreen?'fullscreen':'')} onCancel={e=>{e.preventDefault();void close();}}><div className="modal-head"><div><span className="eyebrow">FDE交付工作台</span><h2>{title}</h2></div><button type="button" className="icon" aria-label="关闭弹窗" onClick={()=>void close()}><X size={22}/></button></div>{children}</dialog></ModalCloseContext.Provider>;
 }
 export function Empty({children}:{children:ReactNode}) {return <div className="empty"><FileText size={28}/><p>{children}</p></div>;}
 export function Badge({value}:{value:string}) {return <span className={'badge '+({'已完成':'done','进行中':'active','暂停':'pause','已取消':'muted','已关闭':'done','高':'danger','处理中':'active'}[value]||'')}>{value}</span>;}
@@ -116,29 +117,13 @@ export function Uploader({pid,onUploaded,onStaged,onBusy,acceptance=false}:{pid?
 }
 export type FieldDef={key:string,label:string,type?:string,required?:boolean,options?:{id:string,name:string,enabled?:boolean,team?:string}[],groupByTeam?:boolean,wide?:boolean,hint?:string,content?:ReactNode,disabled?:boolean,heightKey?:string,min?:number,max?:number};
 export function Fields({fields,value,onChange,disabled=false}:{fields:FieldDef[],value:Row,onChange:(key:string,value:any)=>void,disabled?:boolean}) {
-  return <div className="form-grid">{fields.map(field=>field.groupByTeam&&field.type==='multi'?<div key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span><PeopleCheckboxes label={field.label} people={field.options||[]} value={value[field.key]||[]} onChange={ids=>onChange(field.key,ids)} disabled={disabled||field.disabled}/></div>:field.content?<div key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span>{field.content}</div>:<label key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span>{field.type==='textarea'?<TextareaField field={field} value={value} onChange={onChange} disabled={disabled||!!field.disabled}/>:field.type==='multi'?<div className="checks">{!field.options?.length&&<small>暂无可选资料</small>}{field.options?.map(opt=><label key={opt.id}><input disabled={disabled||field.disabled||opt.enabled===false&&!(value[field.key]||[]).includes(opt.id)} type="checkbox" checked={(value[field.key]||[]).includes(opt.id)} onChange={e=>onChange(field.key,e.target.checked?[...(value[field.key]||[]),opt.id]:(value[field.key]||[]).filter((x:string)=>x!==opt.id))}/><span>{opt.name}{opt.enabled===false?'（已停用）':''}</span></label>)}</div>:field.type==='select'?<select disabled={disabled||field.disabled} required={field.required} value={value[field.key]||''} onChange={e=>onChange(field.key,e.target.value||null)}><option value="">请选择</option>{field.groupByTeam?<PeopleOptions people={field.options||[]} value={value[field.key]} restrictDisabled/>:field.options?.map(opt=><option key={opt.id} value={opt.id} disabled={opt.enabled===false&&value[field.key]!==opt.id}>{opt.name}{opt.enabled===false?'（已停用）':''}</option>)}</select>:field.type==='checkbox'?<input disabled={disabled||field.disabled} type="checkbox" checked={value[field.key]??true} onChange={e=>onChange(field.key,e.target.checked)}/>:<input name={field.key} step={field.type==='money'?'0.01':field.type==='datetime-local'?1:undefined} min={field.min??(field.type==='money'?'0':undefined)} max={field.max??(field.type==='money'?'99999999999999.99':undefined)} inputMode={field.type==='money'?'decimal':undefined} onInput={e=>{if(field.type==='date'||field.type==='datetime-local')onChange(field.key,e.currentTarget.value||null);}} disabled={disabled||field.disabled} type={field.type==='money'?'number':field.type||'text'} required={field.required} value={value[field.key]??''} onChange={e=>onChange(field.key,field.type==='number'?Number(e.target.value):field.type==='date'?e.target.value||null:e.target.value)}/>} {field.hint&&<small>{field.hint}</small>}</label>)}</div>;
+  return <div className="form-grid">{fields.map(field=>field.groupByTeam&&field.type==='multi'?<div key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span><PeopleCheckboxes label={field.label} people={field.options||[]} value={value[field.key]||[]} onChange={ids=>onChange(field.key,ids)} disabled={disabled||field.disabled}/></div>:field.content?<div key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span>{field.content}</div>:field.type==='textarea'?<div key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span><TextareaField field={field} value={value} onChange={onChange} disabled={disabled||!!field.disabled}/>{field.hint&&<small>{field.hint}</small>}</div>:<label key={field.key} className={'field '+(field.wide?'span-2':'')}><span>{field.label}{field.required&&<b> *</b>}</span>{field.type==='multi'?<div className="checks">{!field.options?.length&&<small>暂无可选资料</small>}{field.options?.map(opt=><label key={opt.id}><input disabled={disabled||field.disabled||opt.enabled===false&&!(value[field.key]||[]).includes(opt.id)} type="checkbox" checked={(value[field.key]||[]).includes(opt.id)} onChange={e=>onChange(field.key,e.target.checked?[...(value[field.key]||[]),opt.id]:(value[field.key]||[]).filter((x:string)=>x!==opt.id))}/><span>{opt.name}{opt.enabled===false?'（已停用）':''}</span></label>)}</div>:field.type==='select'?<select disabled={disabled||field.disabled} required={field.required} value={value[field.key]||''} onChange={e=>onChange(field.key,e.target.value||null)}><option value="">请选择</option>{field.groupByTeam?<PeopleOptions people={field.options||[]} value={value[field.key]} restrictDisabled/>:field.options?.map(opt=><option key={opt.id} value={opt.id} disabled={opt.enabled===false&&value[field.key]!==opt.id}>{opt.name}{opt.enabled===false?'（已停用）':''}</option>)}</select>:field.type==='checkbox'?<input disabled={disabled||field.disabled} type="checkbox" checked={value[field.key]??true} onChange={e=>onChange(field.key,e.target.checked)}/>:<input name={field.key} step={field.type==='money'?'0.01':field.type==='datetime-local'?1:undefined} min={field.min??(field.type==='money'?'0':undefined)} max={field.max??(field.type==='money'?'99999999999999.99':undefined)} inputMode={field.type==='money'?'decimal':undefined} onInput={e=>{if(field.type==='date'||field.type==='datetime-local')onChange(field.key,e.currentTarget.value||null);}} disabled={disabled||field.disabled} type={field.type==='money'?'number':field.type||'text'} required={field.required} value={value[field.key]??''} onChange={e=>onChange(field.key,field.type==='number'?Number(e.target.value):field.type==='date'?e.target.value||null:e.target.value)}/>} {field.hint&&<small>{field.hint}</small>}</label>)}</div>;
 }
 
 
 function TextareaField({field,value,onChange,disabled}:{field:FieldDef,value:Row,onChange:(key:string,value:any)=>void,disabled:boolean}) {
-  const ref=useRef<HTMLTextAreaElement>(null), change=useRef(onChange);
-  change.current=onChange;
-  const heightKey=field.heightKey;
-  useEffect(()=>{
-    const textarea=ref.current;
-    if(!textarea||!heightKey||disabled)return;
-    // Ignore the initial observation: opening an unchanged record must stay clean.
-    let previous:number|undefined;
-    const observer=new ResizeObserver(()=>{
-      const height=Math.round(textarea.getBoundingClientRect().height);
-      if(height<80)return;
-      if(previous!==undefined&&height!==previous)change.current(heightKey,height);
-      previous=height;
-    });
-    observer.observe(textarea);
-    return()=>observer.disconnect();
-  },[heightKey,disabled]);
-  return <textarea ref={ref} name={field.key} disabled={disabled} rows={field.wide?3:2} required={field.required}
-    className={heightKey?'remember-textarea-height':undefined} style={heightKey&&value[heightKey]?{height:value[heightKey]}:undefined}
-    value={value[field.key]||''} onChange={e=>onChange(field.key,e.target.value)}/>;
+  return <MarkdownEditor label={field.label} name={field.key} disabled={disabled} rows={field.wide?3:2} required={field.required}
+    className={field.heightKey?'remember-textarea-height':undefined} height={field.heightKey?value[field.heightKey]:undefined}
+    onHeightChange={field.heightKey?height=>onChange(field.heightKey!,height):undefined}
+    value={value[field.key]||''} onChange={text=>onChange(field.key,text)}/>;
 }

@@ -1,3 +1,4 @@
+import {MarkdownContent} from './Markdown';
 import TableViewport from './TableViewport';
 import {useState} from 'react';
 import {Download, Eye, Upload} from 'lucide-react';
@@ -26,7 +27,7 @@ export default function AcceptanceMaterials({pid,files,loading,error,readOnly,on
         <thead><tr><th>附件名称</th><th>材料说明</th><th>上传时间</th><th>验收材料</th><th className="right">操作</th></tr></thead>
         <tbody>{materials.map(file=><tr key={file.id}>
           <td><div className="overview-file-heading"><strong>{file.name}</strong><span className="overview-file-size">{fileSize(file.size)}</span></div></td>
-          <td className="acceptance-description">{file.description||'—'}</td>
+          <td className="acceptance-description"><MarkdownContent text={file.description}/></td>
           <td className="acceptance-uploaded-at"><time dateTime={file.created_at}>{file.created_at.slice(0,16).replace('T',' ')}</time></td>
           <td><AcceptanceToggle file={file} disabled={readOnly}/></td>
           <td><div className="row-actions"><button onClick={()=>setPreview(file)}><Eye size={15}/>预览</button><button onClick={()=>void download('/attachments/'+file.id+'/download').catch(onError)}><Download size={15}/>下载</button><button disabled={readOnly} onClick={()=>void describe(file)}>说明</button></div></td>

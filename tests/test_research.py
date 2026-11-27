@@ -49,7 +49,7 @@ def test_research_required_defaults_sequence_and_validation(client, setup_projec
     response = create_record(client, p, 'research', data(person, module), key)
     assert response.status_code == 200, response.text
     row = response.json()
-    assert [row[x] for x in ['sequence', 'importance', 'responded', 'status', 'notes']] == [1, '中', '是', '设计', '']
+    assert [row[x] for x in ['sequence', 'importance', 'responded', 'status', 'notes', 'is_interface', 'integration_system']] == [1, '中', '是', '设计', '', False, '']
     assert create_record(client, p, 'research', data(person, module), key).json()['id'] == row['id']
     assert create_record(client, p, 'research', data(person, module, notes='另一内容'), key).status_code == 409
     second = create_record(client, p, 'research', data(person, module, sequence=8)).json()
@@ -85,7 +85,7 @@ def test_research_project_isolation_disabled_refs_edit_history_and_archive(clien
     assert client.put(path(p, saved), json=data(person, module, version=saved['version'])).status_code == 409
     assert client.post(path(p, saved)+'/remove', json={'version': saved['version'], 'reason': '测试'}).status_code == 409
     _, _, rows = read_export(client.get(export_path(p)))
-    assert rows[5][3] == module['name'] and rows[5][5:7] == [person['name'], person['name']]
+    assert rows[5][3] == module['name'] and rows[5][7:9] == [person['name'], person['name']]
 
 
 def test_research_sort_filters_pagination_export_all_and_report_unchanged(client, setup_project):
@@ -109,8 +109,8 @@ def test_research_sort_filters_pagination_export_all_and_report_unchanged(client
     assert response.headers['x-export-count'] == '205'
     assert rows[4] == [label for label, _ in COLUMNS]
     assert [int(r[0]) for n, r in rows.items() if n >= 5] == list(range(1, 206))
-    assert rows[5][3:] == [module['name'], '=SUM(1,2)\n需求 %_', person['name'], person['name'], '中', '是', '设计', '方案\n第二行', 'https://example.com']
-    assert sheet.find('s:autoFilter', NS).get('ref') == 'A4:L209'
+    assert rows[5][3:] == [module['name'], '=SUM(1,2)\n需求 %_', '否', '', person['name'], person['name'], '中', '是', '设计', '方案\n第二行', 'https://example.com']
+    assert sheet.find('s:autoFilter', NS).get('ref') == 'A4:N209'
     assert sheet.find('.//s:c[@r="A5"]', NS).get('t') != 's'
     assert (datetime(1899, 12, 30)+timedelta(days=float(rows[5][2]))).strftime('%Y-%m-%d') == '2026-11-05'
     assert any(f.get('formatCode') == 'yyyy-mm-dd' for f in styles.findall('.//s:numFmt', NS))
@@ -145,8 +145,8 @@ def test_research_export_empty_invalid_date_and_oversized_cell(client, setup_pro
 
 def test_research_backup_restore_and_008_upgrade_preserves_existing_data(client, setup_project, tmp_path):
     p, person, module = setup_project('调研备份')
-    row = create_record(client, p, 'research', data(person, module)).json()
-    backup = client.post('/api/backups').json(); assert backup['schema'] == '009'
+    row = create_record(client, p, 'research', data(person, module, is_interface=True, integration_system='HIS')).json()
+    backup = client.post('/api/backups').json(); assert backup['schema'] == '010'
     assert client.put(path(p, row), json=data(person, module, version=row['version'], solution='临时修改')).status_code == 200
     assert client.post('/api/backups/'+backup['name']+'/restore', json={'confirmation': '替换当前业务数据'}).status_code == 200
     assert client.get(path(p, row)).json() == row
@@ -154,6 +154,9 @@ def test_research_backup_restore_and_008_upgrade_preserves_existing_data(client,
         entries = {name: z.read(name) for name in z.namelist()}
     database = tmp_path/'legacy-008.db'; database.write_bytes(entries['project.db'])
     with closing(sqlite3.connect(database)) as db:
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -170,9 +173,69 @@ def test_research_backup_restore_and_008_upgrade_preserves_existing_data(client,
     result = client.post('/api/backups/'+legacy.name+'/restore', json={'confirmation': '替换当前业务数据'})
     assert result.status_code == 200, result.text
     with closing(sqlite3.connect(DATA/'project.db')) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '010'
         assert db.execute('SELECT count(*) FROM requirement_research').fetchone()[0] == 0
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert not db.execute('PRAGMA foreign_key_check').fetchall()
         for name, rows in old.items(): assert db.execute('SELECT * FROM "'+name+'" ORDER BY rowid').fetchall() == rows, name
     assert create_record(client, p, 'research', data(person, module)).status_code == 200
+
+
+def test_research_interface_conditional_requirement_and_history(client, setup_project):
+    p, person, module = setup_project('接口校验')
+    for value in ['', '   ', None]:
+        response = create_record(client, p, 'research', data(person, module, is_interface=True, integration_system=value))
+        assert response.status_code == 422
+    assert create_record(client, p, 'research', data(person, module, is_interface=True)).status_code == 422
+    for invalid in ['是', '否', 1, None]:
+        assert create_record(client, p, 'research', data(person, module, is_interface=invalid)).status_code == 422
+    created = create_record(client, p, 'research', data(person, module, is_interface=True, integration_system='  HIS  ')).json()
+    assert created['is_interface'] is True and created['integration_system'] == 'HIS'
+    bad = client.put(path(p, created), json=data(person, module, version=created['version'], is_interface=True, integration_system=' '))
+    assert bad.status_code == 422
+    assert client.get(path(p, created)).json() == created
+    changed = client.put(path(p, created), json=data(person, module, version=created['version'], is_interface=False, integration_system='HIS')).json()
+    assert changed['is_interface'] is False and changed['integration_system'] == 'HIS'
+    history = client.get(f'/api/projects/{p["id"]}/history/research/{created["id"]}').json()
+    assert history[0]['before']['is_interface'] is True
+    assert history[0]['after']['is_interface'] is False
+
+
+def test_research_interface_filters_export_and_legacy_defaults(client, setup_project):
+    p, person, module = setup_project('接口筛选')
+    other, foreign, foreign_module = setup_project('其他接口')
+    create_record(client, other, 'research', data(foreign, foreign_module, is_interface=True, integration_system='外部项目系统'))
+    legacy = create_record(client, p, 'research', data(person, module, sequence=1)).json()
+    with transaction() as session:
+        row = session.get(m.Research, legacy['id'])
+        old_payload = {k: v for k, v in row.payload.items() if k not in ('is_interface', 'integration_system')}
+        row.payload = dict(old_payload)
+    no = create_record(client, p, 'research', data(person, module, sequence=2, is_interface=False)).json()
+    yes_a = create_record(client, p, 'research', data(person, module, sequence=3, is_interface=True, integration_system='HIS')).json()
+    yes_b = create_record(client, p, 'research', data(person, module, sequence=4, is_interface=True, integration_system='LIS', status='开发')).json()
+    def listing(**filters):
+        response = client.get('/api/records/research', params={'project_id': p['id'], **filters})
+        assert response.status_code == 200, response.text
+        return response.json()
+    assert listing()['total'] == 4
+    assert [r['id'] for r in listing(is_interface='false')['items']] == [legacy['id'], no['id']]
+    assert [r['id'] for r in listing(is_interface='true')['items']] == [yes_a['id'], yes_b['id']]
+    assert listing(is_interface='true', size=1, page=2)['items'][0]['id'] == yes_b['id']
+    assert listing(is_interface='true', status='开发', recorder_id=person['id'])['total'] == 1
+    assert listing(q='LIS')['items'][0]['id'] == yes_b['id']
+    assert listing(is_interface='false', q='HIS')['total'] == 0
+    restored = client.get(path(p, legacy)).json()
+    assert restored['is_interface'] is False and restored['integration_system'] == ''
+    with Session() as session:
+        assert session.get(m.Research, legacy['id']).payload == old_payload
+    for flag, expected in [('false', [legacy, no]), ('true', [yes_a, yes_b])]:
+        response = client.get(export_path(p), params={'is_interface': flag})
+        _, _, rows = read_export(response)
+        assert response.headers['x-export-count'] == '2'
+        assert rows[4][4:7] == ['需求描述', '接口', '对接系统']
+        assert [rows[n][1] for n in sorted(rows) if n >= 5] == [r['code'] for r in expected]
+        assert [rows[n][5] for n in sorted(rows) if n >= 5] == [('是' if flag == 'true' else '否')]*2
+        assert [rows[n][6] for n in sorted(rows) if n >= 5] == (['HIS', 'LIS'] if flag == 'true' else ['', ''])
+        assert ('接口：是' if flag == 'true' else '接口：否') in ' '.join(str(cell) for row in rows.values() for cell in row)
+    for route in ['/api/records/research?project_id='+p['id'], export_path(p)+'?']:
+        assert client.get(route, params={'is_interface': 'invalid'}).status_code == 422

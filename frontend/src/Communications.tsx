@@ -1,3 +1,4 @@
+import {MarkdownContent} from './Markdown';
 import TableViewport from './TableViewport';
 import {useEffect,useState} from 'react';
 import {Plus,Search} from 'lucide-react';
@@ -29,7 +30,7 @@ export default function Communications({pid,people,readOnly,refresh,onNew,onEdit
       <thead><tr><th>时间 / 地点</th><th>主题 / 沟通概况</th><th>主持人 / 记录人</th><th>参与人员</th><th className="right">操作</th></tr></thead>
       <tbody>{result.items.map((row:Row)=><tr key={row.id}>
         <td><span className="communication-time">{row.occurred_at}</span><small>{row.location||'未填写地点'}</small></td>
-        <td><button className="record-title" onClick={()=>onEdit(row)}>{row.subject}</button><p className="truncate" title={row.summary}>{row.summary}</p></td>
+        <td><button className="record-title" onClick={()=>onEdit(row)}>{row.subject}</button><MarkdownContent className="markdown-excerpt" text={row.summary}/></td>
         <td>{names[row.host_id]||'—'}<small>记录：{names[row.recorder_id]||'—'}</small></td>
         <td>{row.participant_ids.map((id:string)=>names[id]||'—').join('、')||'未选择'}</td>
         <td><div className="row-actions"><button className="text-button" onClick={()=>onEdit(row)}>{readOnly?'查看':'编辑'}</button><button className="text-button" onClick={()=>onLog(row.log_id)}>工作日志</button><RowMenu label="沟通更多操作"><button onClick={()=>onHistory(row)}>修订记录</button>{!readOnly&&<button className="error-text" onClick={()=>onRemove(row)}>移除</button>}</RowMenu></div></td>

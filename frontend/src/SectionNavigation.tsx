@@ -1,14 +1,16 @@
 import {useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode} from 'react';
-import {BookOpen, ClipboardList, FilePenLine, Flag, Layers, FileText, FolderCheck, MessagesSquare, SlidersHorizontal, Wallet, ListChecks} from 'lucide-react';
+import {BookOpen, ClipboardList, FilePenLine, Flag, Layers, FileText, FolderCheck, MessagesSquare, SlidersHorizontal, Wallet, ListChecks, PlugZap, Code2, Paperclip} from 'lucide-react';
 import type {Kind} from './api';
 
-type WorkspaceSection = Kind | 'research' | 'communications' | 'configurations' | 'costs' | 'briefs' | 'overview' | 'acceptance';
+type WorkspaceSection = Kind | 'research' | 'interfaces' | 'communications' | 'configurations' | 'costs' | 'briefs' | 'overview' | 'acceptance' | 'coding' | 'attachments';
 
 const sections = [
   {kind:'overview', title:'项目概况', icon:Layers},
-  {kind:'research', title:'需求调研', icon:ListChecks},
   {kind:'tasks', title:'任务计划', icon:ClipboardList},
+  {kind:'research', title:'需求调研', icon:ListChecks},
+  {kind:'interfaces', title:'外部接口', icon:PlugZap},
   {kind:'communications', title:'项目沟通', icon:MessagesSquare},
+  {kind:'coding', title:'代码编写', icon:Code2},
   {kind:'logs', title:'工作日志', icon:BookOpen},
   {kind:'configurations', title:'配置管理', icon:SlidersHorizontal},
   {kind:'changes', title:'需求变更', icon:FilePenLine},
@@ -16,6 +18,7 @@ const sections = [
   {kind:'briefs', title:'项目简报', icon:FileText},
   {kind:'acceptance', title:'验收材料', icon:FolderCheck},
   {kind:'costs', title:'成本管理', icon:Wallet},
+  {kind:'attachments', title:'项目附件', icon:Paperclip},
 ] as const;
 export const sectionId = (kind:WorkspaceSection) => 'section-'+kind;
 const tabId = (kind:WorkspaceSection) => 'workspace-tab-'+kind;
@@ -41,6 +44,7 @@ export function useSectionNavigation(projectId:string) {
   useEffect(()=>{setSelection({kind:'tasks',projectId});},[projectId]);
   useLayoutEffect(()=>{
     document.querySelector('.workspace-scroll')?.scrollTo({top:0,behavior:'instant'});
+    document.querySelector('.project-overview-scroll')?.scrollTo({top:0,behavior:'instant'});
   },[active,projectId]);
   return {
     active,

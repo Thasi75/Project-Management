@@ -99,7 +99,7 @@ def test_current_and_legacy_backups_preserve_files_and_upgrade_flags(client, set
     p, _, _ = setup_project('验收材料备份')
     file = upload(client, p['id'], acceptance=True)
     backup = client.post('/api/backups').json()
-    assert backup['schema'] == '009'
+    assert backup['schema'] == '010'
     assert client.get('/api/backups/' + backup['name'] + '/preview').status_code == 200
     assert mark(client, file, False).status_code == 200
     result = client.post('/api/backups/' + backup['name'] + '/restore', json={'confirmation': '替换当前业务数据'})
@@ -123,6 +123,9 @@ def test_current_and_legacy_backups_preserve_files_and_upgrade_flags(client, set
         db.execute('ALTER TABLE attachments DROP COLUMN is_acceptance')
         for column in ('name', 'team', 'notes', 'enabled', 'version', 'created_at', 'updated_at'):
             db.execute('ALTER TABLE project_members DROP COLUMN ' + column)
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -147,6 +150,6 @@ def test_current_and_legacy_backups_preserve_files_and_upgrade_flags(client, set
     assert materials(client, p['id']) == []
     assert client.get('/api/attachments/' + file['id'] + '/download').content == b'acceptance fixture'
     with sqlite3.connect(DATA / 'project.db') as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == '010'
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []

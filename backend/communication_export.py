@@ -15,8 +15,9 @@ from sqlalchemy import select
 from . import models as m, service as s
 from .config import DATA
 from .exports import document_pdf
+from .markdown_export import append_markdown
 
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 PDF_LOCK = Lock()
 
 
@@ -92,9 +93,7 @@ def build_document(snapshot, target):
         if not content.strip():
             continue
         document.add_paragraph(heading, 'Heading 1')
-        # Preserve literal text, blank lines and indentation; no Markdown interpretation.
-        for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
-            document.add_paragraph(line)
+        append_markdown(document, content)
     footer = section.footer.paragraphs[0]
     footer.alignment = 1
     font(document.styles['Footer'], '宋体', 9)

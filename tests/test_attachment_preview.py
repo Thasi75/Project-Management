@@ -66,7 +66,10 @@ def test_preview_scope_removed_missing_unsupported_and_archived(client, setup_pr
     file = add_file(client, project['id'], '材料.pdf', b'%PDF-1.4\n%%EOF')
     assert client.get(url(other, file)).status_code == 404
     hidden = add_file(client, project['id'], '普通.pdf', b'%PDF-1.4', acceptance=False)
-    assert client.get(url(project, hidden)).status_code == 404
+    assert client.get(url(project, hidden)).status_code == 200
+    assert client.get(url(other, hidden)).status_code == 404
+    current = next(row for row in client.get('/api/projects/' + project['id'] + '/attachments').json() if row['id'] == hidden['id'])
+    assert current['is_acceptance'] is False and current['version'] == hidden['version']
     staged = client.post('/api/attachments/upload?is_acceptance=true', files={'file': ('暂存.pdf', b'%PDF-1.4')}).json()
     assert client.get(url(project, staged)).status_code == 404
     removed = client.put('/api/attachments/' + file['id'], json={'version': file['version'], 'removed': True}).json()
@@ -135,6 +138,23 @@ def test_conversion_does_not_block_other_requests(client, setup_project, monkeyp
         finally:
             finish.set()
         assert request.result().status_code == 200
+
+
+def test_finished_pdf_survives_launcher_timeout(client, setup_project, monkeypatch):
+    project, _, _ = setup_project('转换已完成后超时')
+    file = add_file(client, project['id'], '普通附件.docx', b'finished-timeout', acceptance=False)
+    data = (Path(__file__).parent / 'fixtures/brief_import/sample.pdf').read_bytes()
+    monkeypatch.setattr(preview, 'soffice_path', lambda: str(Path(__file__)))
+    calls = []
+    def convert(command, **kwargs):
+        calls.append(command)
+        assert kwargs['stdout'] == subprocess.DEVNULL and kwargs['stderr'] == subprocess.DEVNULL
+        (Path(command[-1]).parent / 'source.pdf').write_bytes(data)
+        raise subprocess.TimeoutExpired(command, 90)
+    monkeypatch.setattr(preview.subprocess, 'run', convert)
+    assert client.get(url(project, file)).content == data
+    assert client.get(url(project, file)).content == data
+    assert len(calls) == 1
 
 
 @pytest.mark.skipif(not soffice_path(), reason='LibreOffice is not installed')

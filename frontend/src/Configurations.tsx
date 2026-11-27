@@ -1,3 +1,4 @@
+import {MarkdownContent} from './Markdown';
 import TableViewport from './TableViewport';
 import {useEffect,useState} from 'react';
 import {Plus,Search} from 'lucide-react';
@@ -27,8 +28,8 @@ export default function Configurations({pid,readOnly,refresh,onNew,onEdit,onRemo
    <thead><tr><th>项目</th><th>配置信息</th><th>创建或变更日期</th><th>备注</th><th className="right">操作</th></tr></thead>
    <tbody>{result.items.map((row:Row)=><tr key={row.id}>
     <td>{row.config_name}<small>{row.code}</small></td>
-    <td className="configuration-info"><button className="record-title" onClick={()=>onEdit(row)}>{row.config_info}</button></td>
-    <td className="configuration-date">{row.config_date}</td><td className="configuration-notes">{row.notes||'—'}</td>
+    <td className="configuration-info"><MarkdownContent text={row.config_info} onOpen={()=>onEdit(row)}/></td>
+    <td className="configuration-date">{row.config_date}</td><td className="configuration-notes"><MarkdownContent text={row.notes}/></td>
     <td><div className="row-actions"><button className="text-button" onClick={()=>onEdit(row)}>{readOnly?'查看':'编辑'}</button><RowMenu label="配置更多操作"><button onClick={()=>onHistory(row)}>修订记录</button>{!readOnly&&<button className="error-text" onClick={()=>onRemove(row)}>移除</button>}</RowMenu></div></td>
    </tr>)}</tbody>
   </table></TableViewport>}

@@ -7,8 +7,8 @@ from fastapi import HTTPException
 from . import models as m
 from .config import today, now
 
-KINDS = {'tasks': m.Task, 'logs': m.WorkLog, 'changes': m.Change, 'risks': m.Risk, 'communications': m.Communication, 'configurations': m.Configuration, 'costs': m.Cost, 'research': m.Research}
-PREFIX = {'tasks': 'T', 'logs': 'L', 'changes': 'C', 'risks': 'R', 'communications': 'M', 'configurations': 'CFG', 'costs': 'COST', 'research': 'REQ'}
+KINDS = {'tasks': m.Task, 'logs': m.WorkLog, 'changes': m.Change, 'risks': m.Risk, 'communications': m.Communication, 'coding': m.CodingWork, 'configurations': m.Configuration, 'costs': m.Cost, 'research': m.Research}
+PREFIX = {'tasks': 'T', 'logs': 'L', 'changes': 'C', 'risks': 'R', 'communications': 'M', 'coding': 'CODE', 'configurations': 'CFG', 'costs': 'COST', 'research': 'REQ'}
 META = {'version', 'effective_date', 'reason'}
 RELATIONS = {'participant_ids', 'attachment_ids', 'change_ids', 'task_ids'}
 SCOPE_FIELDS = ('scope', 'exclusions', 'deliverables', 'acceptance')
@@ -73,6 +73,11 @@ def plain(obj):
 def serialize(session, obj):
     result = plain(obj)
     result.update(result.pop('payload', {}) or {})
+    if isinstance(obj, m.Research):
+        result.setdefault('is_interface', False)
+        result.setdefault('integration_system', '')
+        result.setdefault('development_notes', '')
+        result.setdefault('go_live_date', None)
     if isinstance(obj, m.Cost):
         result['amount'] = money_string(result.pop('amount_cents'))
     if isinstance(obj, m.Project):
@@ -237,6 +242,9 @@ def save_business(session, pid, kind, data, ident=None, key=None, from_communica
                 fail('该日志由项目沟通同步生成，请在项目沟通中修改日期、功能模块、责任人、参与人员、工作内容及详情', 409)
     if kind == 'research' and data.get('sequence') is None:
         data = {**data, 'sequence': old['sequence'] if old else next_research_sequence(session, pid)}
+    if kind == 'research':
+        # This detail is edited only through the restricted external-interface endpoint.
+        data = {**data, 'development_notes': old.get('development_notes', '') if old else ''}
     validate_refs(session, pid, kind, data, old)
     if kind == 'communications':
         from .schemas import LogInput
@@ -329,6 +337,28 @@ def next_research_sequence(session, pid):
     return number
 
 
+def external_interface(session, pid, ident, write=False):
+    project(session, pid, write)
+    obj = local_ref(session, m.Research, ident, pid)
+    if not obj.payload.get('is_interface', False):
+        fail('该需求已不属于外部接口，请刷新列表', 409)
+    return obj
+
+
+def update_external_interface(session, pid, ident, data):
+    obj = external_interface(session, pid, ident, True)
+    check_version(obj, data['version'])
+    old = serialize(session, obj)
+    obj.status = data['status']
+    obj.payload = {**obj.payload, 'development_notes': data['development_notes'], 'go_live_date': data['go_live_date']}
+    obj.version += 1
+    obj.updated_at = now()
+    session.flush()
+    result = serialize(session, obj)
+    record(session, pid, 'research', ident, old, result, today(), '维护外部接口')
+    return result
+
+
 def business_query(session, pid, kind, **filters):
     model = KINDS[kind]
     query = select(model).where(model.deleted == False)
@@ -337,6 +367,16 @@ def business_query(session, pid, kind, **filters):
         query = query.where(model.project_id == pid)
     else:
         query = query.join(m.Project).where(m.Project.archived == False)
+    if kind == 'research' and filters.get('is_interface') is not None:
+        query = query.where(func.coalesce(model.payload['is_interface'].as_boolean(), False) == filters['is_interface'])
+    if filters.get('status_ne'):
+        if kind not in ('tasks', 'risks', 'research'):
+            fail('此列表不支持排除状态筛选')
+        query = query.where(model.status != filters['status_ne'])
+    if filters.get('overdue'):
+        if kind != 'tasks':
+            fail('仅任务支持逾期筛选')
+        query = query.where(model.status.not_in(('已完成', '已取消')), model.plan_end < today())
     for field in ('status', 'owner_id', 'module_id', 'task_id', 'phase', 'host_id', 'expense_item', 'importance', 'responded', 'source_id', 'recorder_id'):
         if filters.get(field):
             if field == 'task_id' and kind == 'changes':
@@ -346,7 +386,7 @@ def business_query(session, pid, kind, **filters):
                 if column is None:
                     column = model.payload[field].as_string()
                 query = query.where(column == filters[field])
-    date_field = {'logs': 'work_date', 'changes': 'change_date', 'risks': 'raised_date', 'tasks': 'plan_start', 'communications': 'occurred_at', 'configurations': 'config_date', 'costs': 'expense_date', 'research': 'research_date'}[kind]
+    date_field = {'logs': 'work_date', 'changes': 'change_date', 'risks': 'raised_date', 'tasks': 'plan_start', 'communications': 'occurred_at', 'configurations': 'config_date', 'costs': 'expense_date', 'research': 'research_date', 'coding': 'work_date'}[kind]
     if filters.get('start'):
         query = query.where(getattr(model, 'plan_end' if kind == 'tasks' else date_field) >= filters['start'])
     if filters.get('end'):
@@ -358,11 +398,12 @@ def business_query(session, pid, kind, **filters):
                        'changes': ('title', 'content', 'original', 'change_reason', 'source', 'impact', 'notes'),
                        'risks': ('description', 'response', 'notes'),
                        'communications': ('subject', 'location', 'summary', 'details'),
-                       'configurations': ('config_info', 'notes'), 'costs': ('notes',), 'research': ('requirement', 'solution', 'notes')}[kind]
+                       'configurations': ('config_info', 'notes'), 'coding': ('feature', 'work_content', 'extra_time_notes'), 'costs': ('notes',), 'research': ('requirement', 'integration_system', 'solution', 'notes', 'development_notes')}[kind]
         query = query.where(or_(*[model.payload[field].as_string().contains(filters['q'], autoescape=True) for field in text_fields],
                                model.code.contains(filters['q'], autoescape=True),
                                model.name.contains(filters['q'], autoescape=True) if kind == 'tasks' else False,
-                               model.config_name.contains(filters['q'], autoescape=True) if kind == 'configurations' else False))
+                               model.config_name.contains(filters['q'], autoescape=True) if kind == 'configurations' else False,
+                               model.feature.contains(filters['q'], autoescape=True) if kind == 'coding' else False))
     date_column = getattr(model, date_field)
     # All dated lists (and log exports) sort oldest first before pagination.
     # Unknown legacy expense dates belong after dated records.
@@ -396,6 +437,9 @@ def metrics(session, pid=None):
     risks = select(m.Risk).where(m.Risk.deleted == False, m.Risk.status != '已关闭')
     changes = select(m.Change).where(m.Change.deleted == False)
     costs = select(m.Cost.amount_cents).where(m.Cost.deleted == False)
+    unlaunched_interfaces = business_query(session, pid, 'research', is_interface=True, status_ne='上线')
+    coding_query = business_query(session, pid, 'coding').order_by(None).with_only_columns(m.CodingWork.duration_minutes)
+    coding_minutes = int(session.scalar(select(func.coalesce(func.sum(coding_query.subquery().c.duration_minutes), 0))))
     if pid:
         query, risks, changes = query.where(m.Task.project_id == pid), risks.where(m.Risk.project_id == pid), changes.where(m.Change.project_id == pid)
         costs = costs.where(m.Cost.project_id == pid)
@@ -410,8 +454,10 @@ def metrics(session, pid=None):
     project_progress = progress_percent((t.plan_start, t.plan_end, t.status) for t in tasks)
     return {'total': len(tasks), 'completed': complete, 'valid': len(valid),
             'project_progress': project_progress,
+            'coding_minutes': coding_minutes, 'coding_hours': coding_minutes // 60,
             'direct_cost': money_string(sum(session.scalars(costs))),
             'not_started': sum(t.status == '未开始' for t in tasks),
+            'unlaunched_interfaces': session.scalar(select(func.count()).select_from(unlaunched_interfaces.order_by(None).subquery())),
             'overdue': sum(t.status not in ('已完成', '已取消') and t.plan_end < today() for t in tasks),
             'risks': session.scalar(select(func.count()).select_from(risks.subquery())),
             'changes': session.scalar(select(func.count()).select_from(changes.subquery())),

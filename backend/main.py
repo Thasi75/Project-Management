@@ -22,6 +22,7 @@ from .credentials import read_key, save_key
 from .exports import export_brief
 from .attachment_preview import preview_attachment
 from .log_export import export_logs, MIME as XLSX_MIME
+from .brief_import import router as brief_import_router, FORMAT as IMPORT_FORMAT, validate_import_content
 
 executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='brief')
 
@@ -37,7 +38,8 @@ async def lifespan(app):
     executor.shutdown(wait=True)
 
 
-app = FastAPI(title='项目实施交付工作台', version='1.0.0', lifespan=lifespan)
+app = FastAPI(title='FDE交付工作台', version='1.0.0', lifespan=lifespan)
+app.include_router(brief_import_router)
 request_gate = asyncio.Lock()
 
 
@@ -47,7 +49,7 @@ async def coordinate_restore(request, call_next):
     # AI calls run outside this gate and only use short WRITE_LOCK transactions.
     # Preview captures its source under WRITE_LOCK before converting outside it.
     # A slow Office conversion must not block saves or health checks.
-    if request.method == 'GET' and (re.fullmatch(r'/api/projects/[^/]+/attachments/[^/]+/preview', request.url.path)
+    if (request.method == 'POST' and re.fullmatch(r'/api/projects/[^/]+/brief-imports/preview', request.url.path)) or request.method == 'GET' and (re.fullmatch(r'/api/projects/[^/]+/attachments/[^/]+/preview', request.url.path)
                                      or re.fullmatch(r'/api/projects/[^/]+/communications/[^/]+/export/(docx|pdf)', request.url.path)):
         return await call_next(request)
     async with request_gate:
@@ -72,7 +74,7 @@ async def local_access(request, call_next):
     response.headers['X-Frame-Options'] = 'DENY'
     if request.url.path.startswith('/api'):
         response.headers['Cache-Control'] = 'no-store'
-    if request.method in ('POST', 'PUT', 'DELETE') and response.status_code < 300 and request.url.path.startswith('/api') and not any(p in request.url.path for p in ('/backups', '/settings', '/report-preview')):
+    if request.method in ('POST', 'PUT', 'DELETE') and response.status_code < 300 and request.url.path.startswith('/api') and not any(p in request.url.path for p in ('/backups', '/settings', '/report-preview')) and not re.fullmatch(r'/api/projects/[^/]+/brief-imports/(preview|[a-f0-9]{32})', request.url.path):
         try:
             await __import__('starlette.concurrency', fromlist=['run_in_threadpool']).run_in_threadpool(maintenance.auto_backup)
         except Exception:
@@ -222,11 +224,12 @@ def metrics(project_id: str | None = None):
 
 @app.get('/api/records/{kind}')
 def list_records(kind: str, project_id: str | None = None, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=200),
-                 q: str = '', status: str = '', owner_id: str = '', module_id: str = '', task_id: str = '', phase: str = '', start: str = '', end: str = '', host_id: str = '', expense_item: str = '', importance: str = '', responded: str = '', source_id: str = '', recorder_id: str = ''):
+                 q: str = '', status: str = '', owner_id: str = '', module_id: str = '', task_id: str = '', phase: str = '', start: str = '', end: str = '', host_id: str = '', expense_item: str = '', importance: str = '', responded: str = '', source_id: str = '', recorder_id: str = '', is_interface: bool | None = None,
+                 status_ne: str = '', overdue: bool = False):
     if kind not in s.KINDS:
         s.fail('功能不存在', 404)
     with Session() as session:
-        return s.list_business(session, project_id, kind, page, size, q=q, status=status, owner_id=owner_id, module_id=module_id, task_id=task_id, phase=phase, start=start, end=end, host_id=host_id, expense_item=expense_item, importance=importance, responded=responded, source_id=source_id, recorder_id=recorder_id)
+        return s.list_business(session, project_id, kind, page, size, q=q, status=status, owner_id=owner_id, module_id=module_id, task_id=task_id, phase=phase, start=start, end=end, host_id=host_id, expense_item=expense_item, importance=importance, responded=responded, source_id=source_id, recorder_id=recorder_id, is_interface=is_interface, status_ne=status_ne, overdue=overdue)
 
 
 @app.get('/api/projects/{pid}/logs/export')
@@ -257,16 +260,35 @@ def next_research_sequence(pid: str):
 
 @app.get('/api/projects/{pid}/research/export')
 def export_requirements_research(pid: str, q: str = '', module_id: str = '', status: str = '', start: str = '', end: str = '',
-                                 importance: str = '', responded: str = '', source_id: str = '', recorder_id: str = ''):
+                                 importance: str = '', responded: str = '', source_id: str = '', recorder_id: str = '', is_interface: bool | None = None):
     from .research_export import export_research
     with Session() as session:
         content, filename, count = export_research(session, pid, q=q, module_id=module_id, status=status, start=start, end=end,
-            importance=importance, responded=responded, source_id=source_id, recorder_id=recorder_id)
+            importance=importance, responded=responded, source_id=source_id, recorder_id=recorder_id, is_interface=is_interface)
     return Response(content, media_type=XLSX_MIME, headers={
         'Content-Disposition': "attachment; filename*=UTF-8''" + quote(filename), 'X-Export-Count': str(count)})
 
 
-SCHEMAS = {'tasks': sc.TaskInput, 'logs': sc.LogInput, 'changes': sc.ChangeInput, 'risks': sc.RiskInput, 'communications': sc.CommunicationInput, 'configurations': sc.ConfigurationInput, 'costs': sc.CostInput, 'research': sc.ResearchInput}
+@app.get('/api/projects/{pid}/external-interfaces')
+def list_external_interfaces(pid: str, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=200),
+                             q: str = '', status: str = '', source_id: str = '', status_ne: str = ''):
+    with Session() as session:
+        return s.list_business(session, pid, 'research', page, size, is_interface=True, q=q, status=status, source_id=source_id, status_ne=status_ne)
+
+
+@app.get('/api/projects/{pid}/external-interfaces/{ident}')
+def get_external_interface(pid: str, ident: str):
+    with Session() as session:
+        return s.serialize(session, s.external_interface(session, pid, ident))
+
+
+@app.put('/api/projects/{pid}/external-interfaces/{ident}')
+def update_external_interface(pid: str, ident: str, body: sc.ExternalInterfaceInput):
+    with transaction() as session:
+        return s.update_external_interface(session, pid, ident, body.model_dump())
+
+
+SCHEMAS = {'tasks': sc.TaskInput, 'logs': sc.LogInput, 'changes': sc.ChangeInput, 'risks': sc.RiskInput, 'communications': sc.CommunicationInput, 'coding': sc.CodingWorkInput, 'configurations': sc.ConfigurationInput, 'costs': sc.CostInput, 'research': sc.ResearchInput}
 
 
 @app.get('/api/projects/{pid}/records/{kind}/{ident}')
@@ -291,8 +313,11 @@ def create_record(pid: str, kind: str, body: dict, idempotency_key: str = Header
 def update_record(pid: str, kind: str, ident: str, body: dict):
     if kind not in SCHEMAS:
         s.fail('功能不存在', 404)
-    data = validate(SCHEMAS[kind], body)
     with transaction() as session:
+        if kind == 'research' and 'go_live_date' not in body:
+            current = s.local_ref(session, m.Research, ident, pid)
+            body = {**body, 'go_live_date': current.payload.get('go_live_date')}
+        data = validate(SCHEMAS[kind], body)
         return s.save_business(session, pid, kind, data, ident)
 
 
@@ -324,6 +349,15 @@ def attachments(pid: str, acceptance_only: bool = False):
         s.project(session, pid)
         result = []
         query = select(m.Attachment).where(m.Attachment.project_id == pid)
+        # Imported report images are internal document assets. Preserve their IDs,
+        # downloads and exports, but keep them out of project attachment lists.
+        image_ids = set()
+        snapshots = session.scalars(select(m.BriefVersion.snapshot).join(m.Brief, m.BriefVersion.brief_id == m.Brief.id).where(m.Brief.project_id == pid))
+        for snapshot in snapshots:
+            if snapshot.get('format') == IMPORT_FORMAT:
+                image_ids.update(snapshot.get('import', {}).get('asset_ids', []))
+        if image_ids:
+            query = query.where(m.Attachment.id.not_in(image_ids))
         if acceptance_only:
             query = query.where(m.Attachment.is_acceptance == True, m.Attachment.removed == False)
         for item in session.scalars(query.order_by(m.Attachment.created_at.asc(), m.Attachment.id)):
@@ -432,6 +466,8 @@ def generate(pid: str, body: sc.ReportInput):
         snap = reporting.snapshot(session, pid, body.start, body.end)
         if body.brief_id:
             brief = s.local_ref(session, m.Brief, body.brief_id, pid)
+            if session.scalar(select(m.BriefVersion.id).where(m.BriefVersion.brief_id == brief.id, m.BriefVersion.source == '报告导入')):
+                s.fail('导入报告请通过编辑正文维护；如需生成业务简报，请新建生成', 422)
             if (brief.start, brief.end) != (body.start, body.end):
                 s.fail('重新生成必须保持简报日期范围')
         else:
@@ -493,7 +529,10 @@ def edit_brief(ident: str, body: sc.EditBriefInput):
         if source.brief_id != ident:
             s.fail('正文版本不属于当前简报')
         content = body.content.model_dump()
-        reporting.validate_content(content, source.snapshot, numbers=False)
+        if source.snapshot.get('format') == IMPORT_FORMAT:
+            validate_import_content(content)
+        else:
+            reporting.validate_content(content, source.snapshot, numbers=False)
         number = (session.scalar(select(func.max(m.BriefVersion.number)).where(m.BriefVersion.brief_id == ident)) or 0) + 1
         result = m.BriefVersion(brief_id=ident, number=number, snapshot=source.snapshot, content=content, model=source.model, source='人工编辑')
         session.add(result)

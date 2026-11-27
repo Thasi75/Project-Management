@@ -11,7 +11,7 @@ export default function ProjectPeople({people,loading,error,readOnly,onNew,onEdi
     </div>
     {loading?<p className="resource-empty">正在读取人员资料…</p>:error?<div className="resource-error" role="alert"><span>{error}</span><button onClick={onRetry}>重试</button></div>:people.length?
       <div className="people-grid">{groupPeopleByTeam(people).flatMap(group=>group.people).map(person=><button className="person-card" key={person.id} onClick={()=>onEdit(person)} aria-label={(readOnly?'查看人员 ':'编辑人员 ')+person.name}>
-        <span className="avatar">{person.name.slice(0,1)}</span><span className="person-details"><strong>{person.name}</strong><small>{person.team||'未填写单位 / 团队'}</small></span><span className={'badge '+(person.enabled?'active':'muted')}>{person.enabled?'启用':'停用'}</span>
+        <span className="avatar">{person.name.slice(0,1)}</span><span className="person-details"><strong title={person.name}>{person.name}</strong><small title={person.team||'未填写单位 / 团队'}>{person.team||'未填写单位 / 团队'}</small></span><span className={'badge '+(person.enabled?'active':'muted')}>{person.enabled?'启用':'停用'}</span>
       </button>)}</div>:<p className="resource-empty">本项目暂无人员资料{readOnly?'。':'，请点击“新增人员”登记。'}</p>}
   </section>;
 }

@@ -164,7 +164,7 @@ def test_costs_excluded_from_report_sources_metrics_and_model_input(client,setup
 
 def test_cost_backup_roundtrip_and_schema_005_upgrade(client,setup_project,tmp_path):
     p,_,_=setup_project('费用备份');row=create_record(client,p,'costs',data()).json()
-    backup=client.post('/api/backups').json();assert backup['schema']=='009'
+    backup=client.post('/api/backups').json();assert backup['schema']=='010'
     assert client.put(path(p,row),json=data(version=row['version'],amount='30.00')).status_code==200
     assert client.post('/api/backups/'+backup['name']+'/restore',json={'confirmation':'替换当前业务数据'}).status_code==200
     assert client.get(path(p,row)).json()==row and total(client,p)=='10.20'
@@ -175,6 +175,9 @@ def test_cost_backup_roundtrip_and_schema_005_upgrade(client,setup_project,tmp_p
         db.execute('DROP TABLE project_costs')
         db.execute("DELETE FROM entity_revisions WHERE kind='costs'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='costs'")
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -191,7 +194,7 @@ def test_cost_backup_roundtrip_and_schema_005_upgrade(client,setup_project,tmp_p
     restored=client.post('/api/backups/'+legacy.name+'/restore',json={'confirmation':'替换当前业务数据'})
     assert restored.status_code==200,restored.text
     with closing(sqlite3.connect(DATA/'project.db')) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='010'
         assert db.execute('SELECT count(*) FROM project_costs').fetchone()[0]==0
         assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not db.execute('PRAGMA foreign_key_check').fetchall()
@@ -244,6 +247,9 @@ def test_cost_schema_007_keeps_legacy_amounts_and_unknown_dates(client,setup_pro
         db.execute('ALTER TABLE legacy_costs RENAME TO project_costs')
         db.execute('CREATE INDEX ix_project_costs_project_id ON project_costs(project_id)')
         db.execute('CREATE INDEX ix_project_costs_expense_item ON project_costs(expense_item)')
+        db.execute('DROP TABLE coding_work')
+        db.execute("DELETE FROM entity_revisions WHERE kind='coding'")
+        db.execute("DELETE FROM idempotency_keys WHERE kind='coding'")
         db.execute('DROP TABLE requirement_research')
         db.execute("DELETE FROM entity_revisions WHERE kind='research'")
         db.execute("DELETE FROM idempotency_keys WHERE kind='research'")
@@ -261,7 +267,7 @@ def test_cost_schema_007_keeps_legacy_amounts_and_unknown_dates(client,setup_pro
     response=client.post('/api/backups/'+legacy.name+'/restore',json={'confirmation':'替换当前业务数据'})
     assert response.status_code==200,response.text
     with closing(sqlite3.connect(DATA/'project.db')) as db:
-        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='009'
+        assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0]=='010'
         assert db.execute('SELECT count(*) FROM project_costs WHERE expense_date IS NOT NULL').fetchone()[0]==0
         assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not db.execute('PRAGMA foreign_key_check').fetchall()

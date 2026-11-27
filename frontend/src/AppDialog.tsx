@@ -1,3 +1,4 @@
+import {MarkdownEditor,focusMarkdownInput} from './Markdown';
 import {createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode} from 'react';
 import {AlertTriangle, FilePenLine, X} from 'lucide-react';
 
@@ -73,16 +74,16 @@ export function AppDialogProvider({children}: {children: ReactNode}) {
       <form noValidate onSubmit={event => {
         event.preventDefault();
         if (request.mode === 'text' && request.required && !value.trim()) {
-          setError('请填写' + request.label); input.current?.focus(); return;
+          setError('请填写' + request.label); focusMarkdownInput(input.current); return;
         }
         finish(request.mode === 'text' ? value : 'confirmed');
       }}>
         <div className="modal-body">
           <p id={id + '-message'}>{request.message}</p>
-          {request.mode === 'text' && <label className="field"><span>{request.label}{request.required && <b> *</b>}</span>
-            <textarea ref={input} rows={4} value={value} aria-invalid={!!error} aria-describedby={error ? id + '-error' : undefined}
-              onChange={event => {setValue(event.target.value); setError('');}}/>
-          </label>}
+          {request.mode === 'text' && <div className="field"><span>{request.label}{request.required && <b> *</b>}</span>
+            <MarkdownEditor label={request.label||'内容'} textareaRef={input} rows={4} value={value} aria-invalid={!!error} aria-describedby={error ? id + '-error' : undefined}
+              onChange={text => {setValue(text); setError('');}}/>
+          </div>}
           {error && <p id={id + '-error'} className="error-text" role="alert">{error}</p>}
         </div>
         <div className="modal-foot">

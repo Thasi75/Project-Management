@@ -1,6 +1,6 @@
 export type Row = Record<string, any>;
 export type Kind = 'tasks' | 'logs' | 'changes' | 'risks';
-export type RecordKind = Kind | 'communications' | 'configurations' | 'costs' | 'research';
+export type RecordKind = Kind | 'communications' | 'configurations' | 'costs' | 'research' | 'coding';
 export type ResearchNavigation = {filters: Row; index: number; total: number};
 export async function api<T = any>(path: string, method = 'GET', data?: unknown, key?: string): Promise<T> {
   const response = await fetch('/api' + path, {method, headers: {'X-PM-Client':'workbench', ...(data instanceof FormData ? {} : {'Content-Type':'application/json'}), ...(key ? {'Idempotency-Key':key} : {})}, body: data === undefined ? undefined : data instanceof FormData ? data : JSON.stringify(data)});
@@ -19,7 +19,7 @@ export async function download(path: string) {
   link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 export const day = () => new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-export const labels: Record<RecordKind,string> = {tasks:'任务',logs:'工作日志',changes:'需求变更',risks:'项目风险',communications:'项目沟通',configurations:'配置记录',costs:'费用',research:'需求调研'};
+export const labels: Record<RecordKind,string> = {tasks:'任务',logs:'工作日志',changes:'需求变更',risks:'项目风险',communications:'项目沟通',configurations:'配置记录',costs:'费用',research:'需求调研',coding:'代码编写'};
 export const localTime = () => new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date()).replace(' ','T');
 export const taskStates = ['未开始','进行中','暂停','已完成','已取消'];
 export const heads = ['项目概况','本期工作','任务与交付情况','进度偏差','需求变更','风险与待协调事项','后续计划'];

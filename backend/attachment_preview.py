@@ -35,8 +35,8 @@ def preview_attachment(pid, ident):
     with WRITE_LOCK, Session() as session:
         s.project(session, pid)
         item = s.get(session, m.Attachment, ident)
-        if item.project_id != pid or item.removed or not item.is_acceptance:
-            s.fail('当前项目中找不到这份验收材料，请刷新列表', 404)
+        if item.project_id != pid or item.removed:
+            s.fail('当前项目中找不到这份附件，请刷新列表', 404)
         path = (DATA / item.path).resolve()
         if not path.is_relative_to((DATA / 'files').resolve()) or not path.is_file():
             s.fail('附件文件缺失，请从备份恢复', 404)
@@ -99,9 +99,25 @@ def office_pdf(content, extension):
             command = [runner, '-env:UserInstallation=' + profile.as_uri(), '--headless', '--nologo',
                        '--nodefault', '--norestore', '--convert-to', 'pdf', '--outdir', str(work), str(source)]
             try:
-                result = subprocess.run(command, capture_output=True, timeout=90,
+                result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90,
                                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            except (OSError, subprocess.TimeoutExpired):
+            except subprocess.TimeoutExpired:
+                # Windows may retain the launcher after the output is complete.
+                # Avoid pipe reader threads and only accept a fully readable PDF.
+                output = work / 'source.pdf'
+                try:
+                    import pypdfium2 as pdfium
+                    data = output.read_bytes()
+                    if not data.rstrip().endswith(b'%%EOF'):
+                        raise ValueError('Incomplete PDF')
+                    with pdfium.PdfDocument(data) as document:
+                        if not len(document):
+                            raise ValueError('Empty PDF')
+                except (OSError, ValueError, RuntimeError):
+                    s.fail('文档预览生成超时，请重试或下载原文件查看', 503)
+                output.replace(target)
+                return data
+            except OSError:
                 s.fail('文档预览生成超时或无法启动，请重试或下载原文件查看', 503)
             output = work / 'source.pdf'
             if result.returncode != 0 or not output.is_file() or not output.read_bytes().startswith(b'%PDF-'):
